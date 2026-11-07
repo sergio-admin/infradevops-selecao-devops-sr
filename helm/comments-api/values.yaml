@@ -1,4 +1,3 @@
-replicaCount: 2
 
 image:
   repository: 439865637027.dkr.ecr.us-east-2.amazonaws.com/comments-api
