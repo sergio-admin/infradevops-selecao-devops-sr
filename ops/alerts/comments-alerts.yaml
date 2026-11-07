@@ -1,0 +1,57 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: comments-api
+  namespace: monitoring
+spec:
+  groups:
+    - name: comments-api
+      rules:
+        - alert: CommentsApiDown
+          expr: sum(up{namespace="comments"}) == 0 or absent(up{namespace="comments"})
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: API de comentarios fora do ar
+            description: Nenhum pod da API esta respondendo ao Prometheus ha 1 minuto.
+
+        - alert: CommentsApiHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{namespace="comments",status="5xx"}[5m]))
+            / sum(rate(http_requests_total{namespace="comments"}[5m])) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Taxa de erros 5xx acima de 1%
+            description: SLO de erro violado. Taxa atual {{ $value | humanizePercentage }}.
+
+        - alert: CommentsApiHighLatencyP95
+          expr: |
+            histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket{namespace="comments"}[5m])) by (le)) > 0.3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Latencia p95 acima de 300ms
+            description: SLO de latencia violado. p95 atual {{ $value | humanizeDuration }}.
+
+        - alert: CommentsApiPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="comments"}[10m]) > 2
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod da API reiniciando
+            description: O pod {{ $labels.pod }} reiniciou mais de 2 vezes em 10 minutos.
+
+        - alert: CommentsApiHpaAtMax
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="comments"}
+            >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="comments"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: HPA no limite maximo de replicas
+            description: A API esta no maximo de replicas ha 10 minutos. Avaliar aumento de capacidade.
