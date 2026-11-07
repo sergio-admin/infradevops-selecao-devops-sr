@@ -1,0 +1,101 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 439865637027.dkr.ecr.us-east-2.amazonaws.com
+  ECR_REPOSITORY: comments-api
+  CLUSTER_NAME: comments
+  IMAGE: comments-api:${{ github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Testes
+        run: docker run --rm -v ${{ github.workspace }}/app:/app -w /app python:3.13-slim sh -c "pip install -q -r requirements-dev.txt && pytest -v"
+
+      - name: Build da imagem
+        run: docker build -t $IMAGE app
+
+      - name: Exportar imagem
+        run: docker save $IMAGE -o image.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: image.tar
+          retention-days: 1
+
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+
+      - name: Carregar imagem
+        run: docker load -i image.tar
+
+      - name: Trivy - relatorio HIGH e CRITICAL
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed $IMAGE
+
+      - name: Trivy - bloqueia CRITICAL
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache aquasec/trivy:latest image --severity CRITICAL --ignore-unfixed --exit-code 1 $IMAGE
+
+      - name: Checkov
+        run: docker run --rm -v ${{ github.workspace }}:/repo bridgecrew/checkov:latest -d /repo --framework terraform dockerfile github_actions --soft-fail --compact --quiet
+
+  package:
+    needs: scan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+
+      - name: Carregar imagem
+        run: docker load -i image.tar
+
+      - name: Login no ECR
+        run: aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+      - name: Push para o ECR
+        run: |
+          docker tag $IMAGE $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configurar kubectl
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+
+      - name: Deploy com Helm
+        run: helm upgrade --install comments helm/comments-api -n comments --set image.tag=${{ github.sha }} --wait --timeout 5m
+
+      - name: Verificar rollout
+        run: kubectl rollout status deployment/comments -n comments
