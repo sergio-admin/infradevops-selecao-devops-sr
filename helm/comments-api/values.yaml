@@ -1,0 +1,29 @@
+replicaCount: 2
+
+image:
+  repository: 439865637027.dkr.ecr.us-east-2.amazonaws.com/comments-api
+  tag: v1
+
+aws:
+  region: us-east-2
+
+database:
+  host: comments.cj2aiissy05z.us-east-2.rds.amazonaws.com
+  name: comments
+  secretArn: "arn:aws:secretsmanager:us-east-2:439865637027:secret:rds!db-a6713d33-75a8-4bc5-b79b-25e9800a9a90-KK4K9s"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+serviceMonitor:
+  enabled: false
