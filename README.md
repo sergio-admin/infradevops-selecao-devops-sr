@@ -1,4 +1,4 @@
-# API de Comentários — Desafio DevOps
+# API de Comentários — Desafio DevOps 
 
 API REST de comentários em Python (FastAPI) rodando no **Amazon EKS**, com banco **Amazon RDS MySQL** privado, infraestrutura em **Terraform**, pipeline **GitHub Actions** e observabilidade com **Prometheus + Grafana**.
 
